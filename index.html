@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Accident Detector Dashboard — Demo</title>
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-sA+e2Yw8H6kGkGkR1qj3u6gq3bQ9D6sZz9+0m0R0Xv0=" crossorigin=""/>
+  <style>
+    :root{ --accent:#0b74de; --muted:#666; --bg:#0f1724; --card:#0b1220; --glass: rgba(255,255,255,0.03); }
+    html,body{height:100%;margin:0;font-family:Inter,Segoe UI,Roboto,Helvetica,Arial;background:linear-gradient(180deg,#071024 0%,#071a2b 100%);color:#e6eef8}
+    .app{display:grid;grid-template-columns:360px 1fr;gap:16px;height:100vh;padding:16px}
+    .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); border-radius:12px;padding:14px;box-shadow:0 6px 20px rgba(2,6,23,0.6);}
+    header h1{margin:0;font-size:18px}
+    #map{height:100%;border-radius:8px}
+    .sidebar{display:flex;flex-direction:column;gap:12px;height:100%}
+    .controls{display:flex;flex-direction:column;gap:10px}
+    label{font-size:13px;color:var(--muted)}
+    input,button,select{padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:inherit}
+    .row{display:flex;gap:8px}
+    .status{padding:10px;border-radius:8px;background:linear-gradient(90deg, rgba(11,116,222,0.12), rgba(11,116,222,0.06));}
+    .small{font-size:13px}
+    .list{max-height:160px;overflow:auto;padding:6px;gap:6px;display:flex;flex-direction:column}
+    .chip{padding:8px;border-radius:8px;background:var(--glass);display:flex;justify-content:space-between;align-items:center}
+    .muted{color:#9fb0cf}
+    footer{font-size:12px;color:var(--muted);}
+    .map-card{height:100%;display:flex;flex-direction:column}
+    .topbar{display:flex;justify-content:space-between;align-items:center}
+    .big{font-size:28px;margin:0}
+    .danger{color:#ff6b6b}
+    .ok{color:#6be08a}
+    .controls button{cursor:pointer}
+    .recording{background:linear-gradient(90deg,#3b0d0d,#ff3b3b);}
+    .hidden{display:none}
+    .info-row{display:flex;justify-content:space-between;align-items:center}
+    .table{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .map-footer{display:flex;gap:12px;align-items:center}
+    pre{white-space:pre-wrap;font-size:12px}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="card sidebar">
+      <header>
+        <h1>Accident Detector — Demo</h1>
+        <div class="small muted">India-focused prototype · client-only demo</div>
+      </header>
+
+      <section class="controls card">
+        <div class="info-row"><strong>Vehicle Plate</strong><span id="plateDisplay">--</span></div>
+        <div class="row">
+          <input id="plateInput" placeholder="Enter plate (e.g. AP09AB1234)" />
+          <button id="checkInsurance">Check</button>
+        </div>
+        <div id="insuranceResult" class="small muted">Insurance: —</div>
+
+        <hr/>
+        <div class="row">
+          <button id="connectBluetooth">Connect Bluetooth</button>
+          <button id="toggleMotion">Start Tracking</button>
+        </div>
+
+        <div class="status">
+          <div class="small">Status</div>
+          <div class="big" id="statusText">Idle</div>
+          <div class="muted small">Speed: <span id="speed">0</span> km/h · Location: <span id="coords">—</span></div>
+        </div>
+
+        <div class="table">
+          <div class="chip"><div>Nearby Police</div><div id="nearestPolice">—</div></div>
+          <div class="chip"><div>Nearest Hospital</div><div id="nearestHospital">—</div></div>
+          <div class="chip"><div>Nearest Ambulance ETA</div><div id="etaAmbulance">—</div></div>
+          <div class="chip"><div>Engine</div><div id="engineState" class="ok">ON</div></div>
+        </div>
+
+        <hr/>
+        <div>
+          <div class="small">Recordings</div>
+          <div class="row">
+            <button id="startRec">Start Rec</button>
+            <button id="stopRec">Stop Rec</button>
+            <a id="downloadRec" class="small" href="#">Download</a>
+          </div>
+          <div class="small muted">Auto-record 2-minute evidence on accident</div>
+        </div>
+
+        <hr/>
+        <div>
+          <div class="small">Emergency Contacts</div>
+          <div class="list" id="emergencyList"></div>
+        </div>
+
+        <hr/>
+        <div>
+          <div class="small">Doctors (sample)</div>
+          <div class="list" id="doctorList"></div>
+        </div>
+
+        <footer class="small muted">Note: This is a browser-only demo. Real-world deployment requires backend services (SMS/gateway, authenticated mapping keys, vehicle CANbus integration, official emergency APIs).</footer>
+      </section>
+
+      <section class="card small">
+        <div class="small">Controls for demo</div>
+        <div class="row" style="margin-top:8px">
+          <button id="simulateAccident" class="danger">Simulate Accident</button>
+          <button id="simulateOverspeed">Simulate Overspeed</button>
+          <button id="resetDemo">Reset</button>
+        </div>
+        <div class="small muted" style="margin-top:8px">Speeds set in code: alert@80, notify@100, cutoff@120</div>
+      </section>
+
+    </aside>
+
+    <main class="map-card card">
+      <div class="topbar">
+        <div>
+          <h2 class="small">Live Map (India)</h2>
+          <div class="muted small">Shows vehicle, nearest assets, and route estimate</div>
+        </div>
+        <div class="map-footer small muted">Simulated demo • uses browser geolocation & Leaflet</div>
+      </div>
+
+      <div id="map" style="flex:1;margin-top:10px;border-radius:8px"></div>
+    </main>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-o9N1j7kGgP0vKmc2g+gk2QJp2Q/6qH1p2v+5q2vNQ2M=" crossorigin=""></script>
+
+  <script>
+    // -----------------
+    // Sample data (replace by backend lookup)
+    // -----------------
+    const SAMPLE_POLICE = [{name:'KPHB Police Station',coords:[17.4529,78.3910],phone:'040-1234567'},
+                           {name:'Madhapur Police',coords:[17.4471,78.3917],phone:'040-7654321'}];
+    const SAMPLE_HOSPITALS = [{name:'Apollo Hospital Hyderabad',coords:[17.4325,78.3961],phone:'040-1112223',specialists:['Trauma','Orthopedics']},
+                              {name:'Government General Hospital',coords:[17.4399,78.4983],phone:'040-3334445',specialists:['ER','Neurosurgery']}];
+    const SAMPLE_AMBULANCES = [{id:'AMB-01',coords:[17.4500,78.4000],phone:'108'}, {id:'AMB-02',coords:[17.4200,78.3900],phone:'108'}];
+    const SAMPLE_DOCTORS = [{name:'Dr. R. Sharma',spec:'Orthopedics',phone:'9000000001'}, {name:'Dr. A. Rao',spec:'Trauma',phone:'9000000002'}];
+    const SAMPLE_EMERGENCY = [{name:'Police Control',phone:'100'}, {name:'Ambulance',phone:'108'}, {name:'Fire',phone:'101'}];
+    const INSURANCE_DB = {'AP09AB1234':true,'TS09XY9999':false}; // demo
+
+    // -----------------
+    // UI elements
+    // -----------------
+    const mapEl = L.map('map').setView([20.5937,78.9629],5); // center India
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(mapEl);
+
+    const vehicleMarker = L.marker([20.5937,78.9629]).addTo(mapEl).bindPopup('Vehicle');
+    const policeLayer = L.layerGroup().addTo(mapEl);
+    const hospitalLayer = L.layerGroup().addTo(mapEl);
+    const ambulanceLayer = L.layerGroup().addTo(mapEl);
+
+    SAMPLE_POLICE.forEach(p=>L.marker(p.coords).bindPopup(p.name + '\n' + p.phone).addTo(policeLayer));
+    SAMPLE_HOSPITALS.forEach(h=>L.marker(h.coords).bindPopup(h.name + '\n' + h.phone).addTo(hospitalLayer));
+    SAMPLE_AMBULANCES.forEach(a=>L.marker(a.coords).bindPopup(a.id).addTo(ambulanceLayer));
+
+    document.getElementById('insuranceResult').innerText = 'Insurance: —';
+    const emergencyList = document.getElementById('emergencyList'); SAMPLE_EMERGENCY.forEach(e=>{
+      const d = document.createElement('div'); d.className='chip'; d.innerHTML=`<div>${e.name}</div><div><a href="tel:${e.phone}">${e.phone}</a></div>`; emergencyList.appendChild(d);
+    });
+    const doctorList = document.getElementById('doctorList'); SAMPLE_DOCTORS.forEach(d=>{ const el=document.createElement('div'); el.className='chip'; el.innerHTML=`<div>${d.name} (${d.spec})</div><div><a href="tel:${d.phone}">${d.phone}</a></div>`; doctorList.appendChild(el); });
+
+    // -----------------
+    // Simple helpers
+    // -----------------
+    function haversine(a,b){const toR=Math.PI/180;const dLat=(b[0]-a[0])*toR;const dLon=(b[1]-a[1])*toR;const lat1=a[0]*toR;const lat2=b[0]*toR;const R=6371;const res=2*R*Math.asin(Math.sqrt(Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2));return res;}
+    function kmhFromMs(ms){return ms*3.6;}
+
+    // -----------------
+    // App state
+    // -----------------
+    let lastPos=null; let lastTs=null; let speedKmh=0; let tracking=false; let engineOn=true; let mediaRecorder=null; let recordedChunks=[]; let autoRecordTimer=null;
+
+    // thresholds
+    const ALERT_SPEED=80; const NOTIFY_SPEED=100; const CUTOFF_SPEED=120;
+
+    // -----------------
+    // Geolocation tracking & speed
+    // -----------------
+    async function startTracking(){
+      if(!navigator.geolocation) return alert('Geolocation not supported');
+      tracking=true; document.getElementById('toggleMotion').innerText='Stop Tracking';
+      navigator.geolocation.watchPosition(onPosition,{enableHighAccuracy:true,maximumAge:1000,timeout:10000});
+    }
+    function stopTracking(){tracking=false;document.getElementById('toggleMotion').innerText='Start Tracking';}
+
+    function onPosition(p){
+      const lat=p.coords.latitude, lon=p.coords.longitude; const coords=[lat,lon];
+      document.getElementById('coords').innerText = lat.toFixed(5)+','+lon.toFixed(5);
+      vehicleMarker.setLatLng(coords);
+      mapEl.setView(coords,13);
+
+      const ts = Date.now();
+      if(lastPos && lastTs){
+        const distKm = haversine(lastPos,coords);
+        const dt = (ts-lastTs)/1000; // seconds
+        const speedMs = (distKm*1000)/dt; // m/s
+        const s = kmhFromMs(speedMs);
+        if(isFinite(s)) speedKmh = Math.round(s);
+      }
+      lastPos = coords; lastTs = ts;
+      document.getElementById('speed').innerText = speedKmh;
+
+      // speed-based logic
+      if(speedKmh>=ALERT_SPEED && speedKmh<NOTIFY_SPEED){
+        setStatus('Overspeed Warning', 'danger');
+      }
+      if(speedKmh>=NOTIFY_SPEED && speedKmh<CUTOFF_SPEED){
+        notifyControlRoom(`Vehicle crossing ${NOTIFY_SPEED} km/h — current ${speedKmh}`);
+      }
+      if(speedKmh>=CUTOFF_SPEED){
+        // simulate engine cutoff
+        engineOn=false; document.getElementById('engineState').innerText='OFF'; document.getElementById('engineState').classList.remove('ok'); document.getElementById('engineState').classList.add('danger');
+        setStatus('Engine cutoff (simulated) — slowing down', 'danger');
+      }
+
+      // update nearest assets
+      updateNearestAssets(coords);
+    }
+
+    function setStatus(txt, cls){const el=document.getElementById('statusText');el.innerText=txt; if(cls==='danger')el.classList.add('danger'); else el.classList.remove('danger');}
+
+    function updateNearestAssets(coords){
+      // find nearest police/hospital/ambulance by haversine
+      let nearestP = SAMPLE_POLICE.map(p=>({p,dist:haversine(coords,p.coords)})).sort((a,b)=>a.dist-b.dist)[0];
+      let nearestH = SAMPLE_HOSPITALS.map(h=>({h,dist:haversine(coords,h.coords)})).sort((a,b)=>a.dist-b.dist)[0];
+      let nearestA = SAMPLE_AMBULANCES.map(a=>({a,dist:haversine(coords,a.coords)})).sort((a,b)=>a.dist-b.dist)[0];
+      if(nearestP){document.getElementById('nearestPolice').innerText = nearestP.p.name + ' ('+nearestP.dist.toFixed(2)+' km)';}
+      if(nearestH){document.getElementById('nearestHospital').innerText = nearestH.h.name + ' ('+nearestH.dist.toFixed(2)+' km)';}
+      if(nearestA){document.getElementById('etaAmbulance').innerText = (nearestA.dist/40*60).toFixed(0) + ' min (est)';}
+
+      // draw route estimate - simplified: draw polyline from ambulance -> vehicle -> hospital
+      if(window._routeLine) mapEl.removeLayer(window._routeLine);
+      const points = [nearestA.a.coords, coords, nearestH.h.coords];
+      window._routeLine = L.polyline(points,{dashArray:'8'}).addTo(mapEl);
+    }
+
+    // -----------------
+    // Accident detection and response
+    // -----------------
+    function detectAccident(){
+      // In real world: use accelerometer sudden deceleration or crash sensors + vehicle telematics.
+      // Here: act when user clicks simulate or when speed drops violently (not implemented).
+      setStatus('Accident detected! Sending alerts...', 'danger');
+      autoStartRecording();
+      // Simulate sending alerts to police, control room, hospitals, ambulances
+      showAlertToast('Alerts sent to Police, Control Room and nearest Hospital (simulated)');
+      // call favorite contact (simulated by opening tel: for demo user)
+      // send location to favorites - we show a UI panel instead
+      highlightNearestAndOpenPanel();
+    }
+
+    function highlightNearestAndOpenPanel(){
+      // open nearest hospital popup
+      SAMPLE_HOSPITALS.forEach(h=>console.log('Hospital',h.name));
+      // show in UI
+      document.getElementById('statusText').innerText += '\nEmergency contacts alerted.';
+    }
+
+    function notifyControlRoom(msg){
+      console.log('Notify control room:',msg);
+      showAlertToast('Control Room notified: '+msg);
+    }
+
+    function showAlertToast(msg){alert(msg);} // simplistic
+
+    // -----------------
+    // Recording (video + audio) using MediaRecorder
+    // -----------------
+    async function startRecording(){
+      if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return alert('Media devices not supported');
+      try{
+        const stream = await navigator.mediaDevices.getDisplayMedia({video:true,audio:true});
+        recordedChunks = [];
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.ondataavailable = e => { if(e.data.size>0) recordedChunks.push(e.data); };
+        mediaRecorder.onstop = ()=>{
+          const blob = new Blob(recordedChunks,{type:'video/webm'});
+          const url = URL.createObjectURL(blob);
+          const dl = document.getElementById('downloadRec'); dl.href = url; dl.download='accident_recording.webm'; dl.innerText='Download recording';
+        };
+        mediaRecorder.start();
+        document.getElementById('startRec').classList.add('recording');
+        showAlertToast('Recording started (screen capture). For camera-recording, implement getUserMedia with camera permission.');
+      }catch(err){console.error(err);alert('Permission denied or no source');}
+    }
+    function stopRecording(){ if(mediaRecorder && mediaRecorder.state!=='inactive') mediaRecorder.stop(); document.getElementById('startRec').classList.remove('recording'); }
+
+    function autoStartRecording(){
+      startRecording();
+      // auto stop after 120s
+      if(autoRecordTimer) clearTimeout(autoRecordTimer);
+      autoRecordTimer = setTimeout(()=>{ stopRecording(); showAlertToast('Auto-recording (2 min) finished'); }, 120*1000);
+    }
+
+    // -----------------
+    // Bluetooth (Web Bluetooth) - demo only
+    // -----------------
+    async function connectBluetooth(){
+      if(!navigator.bluetooth) return alert('Web Bluetooth not supported in this browser');
+      try{
+        const device = await navigator.bluetooth.requestDevice({acceptAllDevices:true});
+        console.log('Connected to',device.name || device.id);
+        showAlertToast('Bluetooth device selected: '+(device.name||device.id));
+      }catch(err){console.error(err); alert('Bluetooth permission denied or cancelled');}
+    }
+
+    // -----------------
+    // Insurance check
+    // -----------------
+    document.getElementById('checkInsurance').addEventListener('click', ()=>{
+      const plate = document.getElementById('plateInput').value.trim().toUpperCase(); document.getElementById('plateDisplay').innerText = plate || '--';
+      const ok = INSURANCE_DB[plate] === true;
+      document.getElementById('insuranceResult').innerText = 'Insurance: ' + (ok ? 'Active' : 'Not found / Inactive (demo)');
+    });
+
+    // -----------------
+    // Wire up UI controls
+    // -----------------
+    document.getElementById('toggleMotion').addEventListener('click', ()=>{ if(tracking) stopTracking(); else startTracking(); });
+    document.getElementById('simulateAccident').addEventListener('click', ()=>{ detectAccident(); });
+    document.getElementById('simulateOverspeed').addEventListener('click', ()=>{ speedKmh = 130; document.getElementById('speed').innerText=speedKmh; notifyControlRoom('Simulated overspeed'); setStatus('Overspeed: engine cutoff (simulated)','danger'); engineOn=false; document.getElementById('engineState').innerText='OFF'; document.getElementById('engineState').classList.add('danger'); });
+    document.getElementById('resetDemo').addEventListener('click', ()=>{ speedKmh=0; document.getElementById('speed').innerText=0; engineOn=true; document.getElementById('engineState').innerText='ON'; document.getElementById('engineState').classList.remove('danger'); setStatus('Idle'); });
+
+    document.getElementById('connectBluetooth').addEventListener('click', connectBluetooth);
+    document.getElementById('startRec').addEventListener('click', startRecording);
+    document.getElementById('stopRec').addEventListener('click', stopRecording);
+
+    // connect favorite contact: for demo we open tel: link to first emergency contact
+    function callFavorite(){ const fav = SAMPLE_EMERGENCY[0]; window.open('tel:'+fav.phone); }
+
+    // show initial map markers and UI
+    setStatus('Idle');
+  </script>
+</body>
+</html>
